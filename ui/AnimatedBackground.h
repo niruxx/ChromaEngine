@@ -18,6 +18,12 @@ public:
 
     void setTheme(int theme);
 
+    // Stops/restarts the repaint timer without touching the theme, so it
+    // can be silenced during e.g. a window drag (repainting an animated,
+    // window-spanning background on every drag-move competes with the
+    // move itself for repaint bandwidth and made dragging feel laggy).
+    void setPaused(bool paused);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
 

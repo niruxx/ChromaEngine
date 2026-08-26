@@ -16,11 +16,14 @@
 #include "colorfy/MonitorManager.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QSharedMemory>
+#include <QStandardPaths>
+#include <QTextStream>
 #include <QTimer>
 
 #include <windows.h>
@@ -31,6 +34,25 @@
 using namespace colorfy;
 
 namespace {
+
+// TEMPORARY diagnostic: pinpointing a reported freeze (spinning cursor,
+// rest of the OS stays responsive) when closing to tray then right-
+// clicking the tray icon. Shares one log file with SettingsWindow.cpp and
+// TrayIcon.cpp. The heartbeat is the key piece: if it keeps ticking through
+// the "frozen cursor" window, the main thread's event loop is fine and the
+// problem is elsewhere (shell/tray layer); if it stops, the main thread is
+// genuinely blocked and whatever ran just before the last tick is the
+// cause. Remove once resolved.
+void chromaDebugLog(const QString& line)
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir().mkpath(dir);
+    QFile f(dir + QStringLiteral("/chroma_debug.log"));
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream ts(&f);
+        ts << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " " << line << Qt::endl;
+    }
+}
 
 struct MonitorSurface {
     WallpaperWindow* window = nullptr;
@@ -118,6 +140,10 @@ int main(int argc, char* argv[])
             ConfigStore::save(*media);
         }
     });
+
+    auto* heartbeatTimer = new QTimer(&app);
+    QObject::connect(heartbeatTimer, &QTimer::timeout, &app, [] { chromaDebugLog(QStringLiteral("heartbeat")); });
+    heartbeatTimer->start(250);
 
     auto* workerWHost = new WorkerWHost(&app);
     auto currentWorkerW = std::make_shared<void*>(workerWHost->attach());
@@ -212,11 +238,18 @@ int main(int argc, char* argv[])
     auto* trayIcon = new TrayIcon(&app);
 
     QObject::connect(trayIcon, &TrayIcon::openSettingsRequested, settingsWindow, [settingsWindow] {
+        chromaDebugLog(QStringLiteral("openSettingsRequested: show() start"));
         settingsWindow->show();
+        chromaDebugLog(QStringLiteral("openSettingsRequested: show() done, raise() start"));
         settingsWindow->raise();
+        chromaDebugLog(QStringLiteral("openSettingsRequested: raise() done, activateWindow() start"));
         settingsWindow->activateWindow();
+        chromaDebugLog(QStringLiteral("openSettingsRequested: activateWindow() done"));
     });
-    QObject::connect(trayIcon, &TrayIcon::quitRequested, &app, &QApplication::quit);
+    QObject::connect(trayIcon, &TrayIcon::quitRequested, &app, [] {
+        chromaDebugLog(QStringLiteral("quitRequested"));
+        qApp->quit();
+    });
     QObject::connect(trayIcon, &TrayIcon::pauseToggled, &app,
                       [forEachDesktopSurface](bool paused) { forEachDesktopSurface([paused](MpvSurface* s) { s->setPaused(paused); }); });
 

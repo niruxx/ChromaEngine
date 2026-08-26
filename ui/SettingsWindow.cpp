@@ -6,7 +6,10 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QEvent>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -23,9 +26,11 @@
 #include <QScrollArea>
 #include <QSlider>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStorageInfo>
 #include <QStyle>
+#include <QTextStream>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -78,6 +83,22 @@ QSlider* makeSlider(int min, int max, int value)
     slider->setRange(min, max);
     slider->setValue(value);
     return slider;
+}
+
+// TEMPORARY diagnostic: pinpointing a reported freeze (spinning cursor,
+// rest of the OS stays responsive) when closing to tray then right-
+// clicking the tray icon. Shares one log file with TrayIcon.cpp and
+// main_windows.cpp's heartbeat so the whole sequence interleaves into one
+// timeline. Remove once resolved.
+void chromaDebugLog(const QString& line)
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir().mkpath(dir);
+    QFile f(dir + QStringLiteral("/chroma_debug.log"));
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream ts(&f);
+        ts << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " " << line << Qt::endl;
+    }
 }
 
 } // namespace
@@ -197,6 +218,23 @@ void SettingsWindow::buildUi()
             showMaximized();
     });
     connect(m_titleBar, &CustomTitleBar::closeRequested, this, &SettingsWindow::close);
+    // Repainting an animated, window-spanning background (and, if auto-play
+    // is on, cycling every library tile's frame) on every drag-move frame
+    // competed with the move itself for repaint bandwidth and made
+    // dragging feel laggy. Silencing both for the duration of a drag is
+    // imperceptible (nobody's looking at the background animate mid-drag)
+    // and removes that contention. m_animatedBackground/m_frameTimer aren't
+    // created yet at this point in buildUi(), but these lambdas only run
+    // later, once an actual drag happens.
+    connect(m_titleBar, &CustomTitleBar::dragStarted, this, [this] {
+        m_animatedBackground->setPaused(true);
+        m_frameTimer->stop();
+    });
+    connect(m_titleBar, &CustomTitleBar::dragFinished, this, [this] {
+        m_animatedBackground->setPaused(false);
+        if (m_thumbnailAutoPlayEnabled)
+            m_frameTimer->start(kFrameAdvanceMs);
+    });
     setMenuWidget(m_titleBar);
 
     auto* toolbar = addToolBar(QStringLiteral("Main"));
@@ -520,6 +558,7 @@ void SettingsWindow::buildUi()
 
 void SettingsWindow::setThumbnailAutoPlayEnabled(bool enabled)
 {
+    m_thumbnailAutoPlayEnabled = enabled;
     if (enabled) {
         m_frameTimer->start(kFrameAdvanceMs);
         return;
@@ -672,9 +711,11 @@ void SettingsWindow::advanceFrame()
 
 void SettingsWindow::closeEvent(QCloseEvent* event)
 {
+    chromaDebugLog(QStringLiteral("SettingsWindow::closeEvent closeToTray=%1").arg(m_closeToTray));
     if (m_closeToTray) {
         event->ignore();
         hide();
+        chromaDebugLog(QStringLiteral("SettingsWindow::closeEvent hide() returned"));
     } else {
         event->accept();
     }

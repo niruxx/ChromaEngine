@@ -102,6 +102,7 @@ void CustomTitleBar::mousePressEvent(QMouseEvent* event)
         m_dragging = true;
         m_dragStartGlobalPos = event->globalPosition().toPoint();
         m_dragStartWindowPos = window()->pos();
+        emit dragStarted();
         event->accept();
         return;
     }
@@ -123,6 +124,7 @@ void CustomTitleBar::mouseReleaseEvent(QMouseEvent* event)
 {
     if (m_dragging && event->button() == Qt::LeftButton) {
         m_dragging = false;
+        emit dragFinished();
         event->accept();
         return;
     }

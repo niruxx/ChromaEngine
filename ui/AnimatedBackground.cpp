@@ -35,6 +35,14 @@ void AnimatedBackground::setTheme(int theme)
     update();
 }
 
+void AnimatedBackground::setPaused(bool paused)
+{
+    if (paused)
+        m_timer->stop();
+    else if (m_theme != None && !m_timer->isActive())
+        m_timer->start(kTimerIntervalMs);
+}
+
 void AnimatedBackground::ensureStars()
 {
     if (!m_stars.isEmpty() || width() <= 0 || height() <= 0)

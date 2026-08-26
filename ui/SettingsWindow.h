@@ -141,6 +141,7 @@ private:
     bool m_closeToTray = true;
     int m_currentFrame = 0;
     QTimer* m_frameTimer = nullptr;
+    bool m_thumbnailAutoPlayEnabled = false;
 };
 
 } // namespace colorfy

@@ -135,44 +135,69 @@ void ThumbnailGenerator::startNext()
     exStyle |= WS_EX_NOACTIVATE;
     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
 
-    m_mpv = mpv_create();
-    if (!m_mpv) {
-        qWarning() << "ThumbnailGenerator: mpv_create failed";
-        finishCurrent();
-        return;
-    }
+    const int64_t wid = reinterpret_cast<int64_t>(hwnd);
+    const QString path = m_activePath;
 
-    int64_t wid = reinterpret_cast<int64_t>(hwnd);
-    mpv_set_option(m_mpv, "wid", MPV_FORMAT_INT64, &wid);
-    mpv_set_option_string(m_mpv, "mute", "yes");
-    mpv_set_option_string(m_mpv, "audio", "no");
-    // Software decode: deterministic and avoids any GPU/driver session
-    // flakiness from rapidly creating and tearing down mpv instances.
-    mpv_set_option_string(m_mpv, "hwdec", "no");
-    // Without this, FFmpeg's software decoder defaults to roughly one
-    // thread per CPU core for frame/slice-parallel decoding - reasonable
-    // for a single real-time player, but this mpv instance is a throwaway
-    // used only to grab a handful of still frames, and every video in a
-    // folder scan gets one in sequence, on top of the wallpaper's and the
-    // preview's own uncapped decode threads running at the same time. That
-    // combination was almost certainly what made the app feel like it
-    // "froze" during thumbnail generation - not a deadlock, but the main
-    // thread starved for CPU time by hundreds of decode threads across
-    // several concurrent mpv instances.
-    mpv_set_option_string(m_mpv, "vd-lavc-threads", "2");
-    mpv_set_option_string(m_mpv, "osc", "no");
-    mpv_set_option_string(m_mpv, "osd-level", "0");
-    mpv_set_option_string(m_mpv, "start", QByteArray::number(kStopPercents[0]).append('%').constData());
-    mpv_set_option_string(m_mpv, "keep-open", "yes");
-    mpv_set_option_string(m_mpv, "input-default-bindings", "no");
-    mpv_set_option_string(m_mpv, "input-vo-keyboard", "no");
-    mpv_initialize(m_mpv);
+    // mpv_create/mpv_initialize/loadfile all run off the main thread - only
+    // the QWidget above (needed for its HWND) has to be created here.
+    // mpv_initialize in particular can take a real, noticeable moment
+    // (probing decoders, etc.), and doing this synchronously on the main
+    // thread once per file in a folder scan was a separate source of
+    // stutter beyond the screenshot capture itself (see applyVideoFilters-
+    // adjacent comments elsewhere for the general pattern: anything that
+    // blocks on mpv's C API doesn't belong on the UI thread).
+    QMetaObject::invokeMethod(
+        m_workerContext,
+        [this, wid, path]() {
+            mpv_handle* mpv = mpv_create();
+            if (!mpv) {
+                QMetaObject::invokeMethod(
+                    this,
+                    [this] {
+                        qWarning() << "ThumbnailGenerator: mpv_create failed";
+                        finishCurrent();
+                    },
+                    Qt::QueuedConnection);
+                return;
+            }
 
-    const QByteArray utf8Path = m_activePath.toUtf8();
-    const char* args[] = {"loadfile", utf8Path.constData(), nullptr};
-    mpv_command(m_mpv, args);
+            int64_t widLocal = wid;
+            mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &widLocal);
+            mpv_set_option_string(mpv, "mute", "yes");
+            mpv_set_option_string(mpv, "audio", "no");
+            // Software decode: deterministic and avoids any GPU/driver
+            // session flakiness from rapidly creating and tearing down mpv
+            // instances.
+            mpv_set_option_string(mpv, "hwdec", "no");
+            // Without this, FFmpeg's software decoder defaults to roughly
+            // one thread per CPU core for frame/slice-parallel decoding -
+            // reasonable for a single real-time player, but this mpv
+            // instance is a throwaway used only to grab a handful of still
+            // frames, and every video in a folder scan gets one in
+            // sequence, on top of the wallpaper's and the preview's own
+            // decode threads running at the same time.
+            mpv_set_option_string(mpv, "vd-lavc-threads", "2");
+            mpv_set_option_string(mpv, "osc", "no");
+            mpv_set_option_string(mpv, "osd-level", "0");
+            mpv_set_option_string(mpv, "start", QByteArray::number(kStopPercents[0]).append('%').constData());
+            mpv_set_option_string(mpv, "keep-open", "yes");
+            mpv_set_option_string(mpv, "input-default-bindings", "no");
+            mpv_set_option_string(mpv, "input-vo-keyboard", "no");
+            mpv_initialize(mpv);
 
-    m_captureTimer->start(kInitialSettleMs);
+            const QByteArray utf8Path = path.toUtf8();
+            const char* args[] = {"loadfile", utf8Path.constData(), nullptr};
+            mpv_command(mpv, args);
+
+            QMetaObject::invokeMethod(
+                this,
+                [this, mpv] {
+                    m_mpv = mpv;
+                    m_captureTimer->start(kInitialSettleMs);
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
 }
 
 void ThumbnailGenerator::captureCurrent()
@@ -251,8 +276,13 @@ void ThumbnailGenerator::seekToNextStop()
 void ThumbnailGenerator::finishCurrent()
 {
     if (m_mpv) {
-        mpv_terminate_destroy(m_mpv);
+        // Fire-and-forget on the worker thread: tearing down an mpv
+        // instance can briefly block (joining its internal threads), and
+        // that doesn't need to hold up starting the next file - each
+        // file's mpv_handle is entirely independent.
+        mpv_handle* mpv = m_mpv;
         m_mpv = nullptr;
+        QMetaObject::invokeMethod(m_workerContext, [mpv]() { mpv_terminate_destroy(mpv); }, Qt::QueuedConnection);
     }
     if (m_captureWidget) {
         m_captureWidget->deleteLater();

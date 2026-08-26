@@ -47,6 +47,10 @@ signals:
     void minimizeRequested();
     void maximizeRestoreRequested();
     void closeRequested();
+    // Lets the owning window silence expensive repaint work (the animated
+    // background) while a drag is in progress.
+    void dragStarted();
+    void dragFinished();
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
