@@ -1,9 +1,9 @@
 #include "TrayIcon.h"
 
+#include "IconFactory.h"
+
 #include <QAction>
-#include <QApplication>
 #include <QMenu>
-#include <QStyle>
 #include <QSystemTrayIcon>
 
 namespace colorfy {
@@ -26,8 +26,8 @@ TrayIcon::TrayIcon(QObject* parent)
     connect(quitAction, &QAction::triggered, this, &TrayIcon::quitRequested);
 
     m_trayIcon = new QSystemTrayIcon(this);
-    m_trayIcon->setIcon(QApplication::style()->standardIcon(QStyle::SP_DesktopIcon));
-    m_trayIcon->setToolTip(QStringLiteral("Colorfy Engine"));
+    m_trayIcon->setIcon(IconFactory::appLogo(32));
+    m_trayIcon->setToolTip(QStringLiteral("ChromaEngine"));
     m_trayIcon->setContextMenu(m_menu);
     m_trayIcon->show();
 

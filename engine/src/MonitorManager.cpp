@@ -35,4 +35,55 @@ QList<QRect> MonitorManager::allGeometries()
     return geometries;
 }
 
+#ifdef _WIN32
+namespace {
+
+BOOL CALLBACK enumMonitorProc(HMONITOR hMonitor, HDC, LPRECT, LPARAM lParam)
+{
+    auto* result = reinterpret_cast<QList<MonitorInfo>*>(lParam);
+
+    MONITORINFOEXW info;
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(hMonitor, &info))
+        return TRUE;
+
+    MonitorInfo monitor;
+    monitor.id = QString::fromWCharArray(info.szDevice);
+    monitor.isPrimary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
+    monitor.geometry = QRect(info.rcMonitor.left, info.rcMonitor.top,
+                              info.rcMonitor.right - info.rcMonitor.left,
+                              info.rcMonitor.bottom - info.rcMonitor.top);
+    monitor.name = QStringLiteral("%1 (%2x%3)%4")
+                       .arg(monitor.id)
+                       .arg(monitor.geometry.width())
+                       .arg(monitor.geometry.height())
+                       .arg(monitor.isPrimary ? QStringLiteral(" — Primary") : QString());
+
+    result->append(monitor);
+    return TRUE;
+}
+
+} // namespace
+#endif
+
+QList<MonitorInfo> MonitorManager::listMonitors()
+{
+    QList<MonitorInfo> monitors;
+
+#ifdef _WIN32
+    EnumDisplayMonitors(nullptr, nullptr, enumMonitorProc, reinterpret_cast<LPARAM>(&monitors));
+#endif
+
+    if (monitors.isEmpty()) {
+        MonitorInfo fallback;
+        fallback.id = QStringLiteral("primary");
+        fallback.geometry = primaryGeometry();
+        fallback.isPrimary = true;
+        fallback.name = QStringLiteral("Primary Display");
+        monitors.append(fallback);
+    }
+
+    return monitors;
+}
+
 } // namespace colorfy

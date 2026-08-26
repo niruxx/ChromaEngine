@@ -18,6 +18,11 @@ public:
 
     void startWatchdog(int intervalMs = 2000);
 
+    // Whether the wallpaper should sit behind the desktop icons (true,
+    // default - matches normal desktop behavior) or in front of them (false
+    // - hides the icons under the wallpaper for users who prefer that).
+    void setShowDesktopIcons(bool show);
+
 signals:
     void workerWChanged(void* hwnd);
 
@@ -26,8 +31,11 @@ private slots:
 
 private:
     void* locateWorkerW();
+    void enforceStacking();
 
     void* m_workerW = nullptr;
+    void* m_iconHostWorkerW = nullptr;
+    bool m_showDesktopIcons = true;
 };
 
 } // namespace colorfy

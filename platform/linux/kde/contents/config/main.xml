@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile arg="true"/>
+  <group name="General">
+    <entry name="FolderPath" type="String">
+      <label>Folder containing wallpaper videos/GIFs.</label>
+      <default></default>
+    </entry>
+    <entry name="SelectedFile" type="String">
+      <label>Absolute path of the file currently applied as wallpaper.</label>
+      <default></default>
+    </entry>
+    <!-- Shared by Image/AnimatedImage/VideoOutput fillMode: 0=Stretch, 1=PreserveAspectFit (Fit), 2=PreserveAspectCrop (Fill/Cover) -->
+    <entry name="FillMode" type="Int">
+      <label>Video fill mode.</label>
+      <default>2</default>
+    </entry>
+    <entry name="Muted" type="Bool">
+      <label>Whether audio (if any) is muted.</label>
+      <default>true</default>
+    </entry>
+    <entry name="Volume" type="Int">
+      <label>Volume percent, used when not muted.</label>
+      <default>100</default>
+      <min>0</min>
+      <max>100</max>
+    </entry>
+    <entry name="PlaybackRate" type="Double">
+      <label>Playback speed multiplier.</label>
+      <default>1.0</default>
+      <min>0.25</min>
+      <max>3.0</max>
+    </entry>
+  </group>
+</kcfg>

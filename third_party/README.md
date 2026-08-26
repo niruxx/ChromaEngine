@@ -1,6 +1,6 @@
 # libmpv (Windows)
 
-Colorfy Engine embeds [libmpv](https://mpv.io/) to decode and render both MP4
+ChromaEngine embeds [libmpv](https://mpv.io/) to decode and render both MP4
 video and GIF files through the same code path. On Windows there's no vcpkg
 port worth using here (it rebuilds ffmpeg from source and takes a very long
 time) — use a prebuilt dev package instead:

@@ -23,12 +23,29 @@ public:
     void setVolume(int volumePercent);
     void setFitMode(FitMode mode);
     void setPaused(bool paused);
+    void setFlip(bool horizontal, bool vertical);
+    void setSpeed(double rate);
+    void setBrightness(int value);
+    void setContrast(int value);
+    void setSaturation(int value);
+    void setZoom(double logScale);
+    void setFrameRateLimit(int fps); // 0 = unlimited
+
+signals:
+    void videoSizeChanged(int width, int height);
 
 private slots:
     void pumpEvents();
 
 private:
+    void applyVideoFilters();
+
     mpv_handle* m_mpv = nullptr;
+    int m_pendingWidth = 0;
+    int m_pendingHeight = 0;
+    bool m_flipHorizontal = false;
+    bool m_flipVertical = false;
+    int m_frameRateLimit = 0;
 };
 
 } // namespace colorfy

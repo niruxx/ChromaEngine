@@ -31,10 +31,18 @@ void LibraryItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
 
     painter->fillPath(cardPath, QColor(0x18, 0x18, 0x1a));
 
-    const QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
-    if (!icon.isNull()) {
-        const QPixmap pixmap = icon.pixmap(tileRect.size());
-        const QPixmap scaled = pixmap.scaled(tileRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap frame;
+    const QList<QPixmap> frames = index.data(FramesRole).value<QList<QPixmap>>();
+    if (!frames.isEmpty()) {
+        frame = frames.at(m_currentFrame % frames.size());
+    } else {
+        const QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+        if (!icon.isNull())
+            frame = icon.pixmap(tileRect.size());
+    }
+
+    if (!frame.isNull()) {
+        const QPixmap scaled = frame.scaled(tileRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
         const QPoint center(tileRect.center().x() - scaled.width() / 2, tileRect.center().y() - scaled.height() / 2);
         painter->drawPixmap(center, scaled);
     }
@@ -76,6 +84,11 @@ void LibraryItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
 QSize LibraryItemDelegate::sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const
 {
     return QSize(kTileWidth, kTileHeight);
+}
+
+void LibraryItemDelegate::setCurrentFrame(int frame)
+{
+    m_currentFrame = frame;
 }
 
 } // namespace colorfy

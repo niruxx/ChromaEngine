@@ -1,7 +1,11 @@
 add_library(colorfy_ui STATIC
     SettingsWindow.cpp
+    SettingsDialog.cpp
     TrayIcon.cpp
     LibraryItemDelegate.cpp
+    IconFactory.cpp
+    CustomTitleBar.cpp
+    AnimatedBackground.cpp
 )
 
 target_include_directories(colorfy_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

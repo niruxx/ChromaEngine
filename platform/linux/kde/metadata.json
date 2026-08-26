@@ -1,0 +1,22 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "ChromaEngine"
+            }
+        ],
+        "Category": "Wallpaper Images",
+        "Description": "Plays local videos and GIFs as an animated desktop wallpaper.",
+        "Icon": "video-x-generic",
+        "Id": "com.chromaengine.wallpaper",
+        "License": "MIT",
+        "Name": "ChromaEngine",
+        "ServiceTypes": [
+            "Plasma/Wallpaper"
+        ],
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml"
+}
