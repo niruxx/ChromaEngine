@@ -1,9 +1,23 @@
-# libmpv (Windows)
+# libmpv
 
 ChromaEngine embeds [libmpv](https://mpv.io/) to decode and render both MP4
-video and GIF files through the same code path. On Windows there's no vcpkg
-port worth using here (it rebuilds ffmpeg from source and takes a very long
-time) — use a prebuilt dev package instead:
+video and GIF files through the same code path.
+
+## Linux
+
+Distro packages already include libmpv's headers and a `pkg-config` file -
+`render/CMakeLists.txt` finds it via `pkg_check_modules(MPV REQUIRED
+IMPORTED_TARGET mpv)`, no manual download or `-DMPV_DIR` needed. Install the
+dev package for your distro before configuring the build:
+
+- Debian/Ubuntu: `libmpv-dev`
+- Fedora: `mpv-libs-devel`
+- Arch: `mpv` (the runtime package already ships `mpv.pc` and the headers)
+
+## Windows
+
+There's no vcpkg port worth using here (it rebuilds ffmpeg from source and
+takes a very long time) — use a prebuilt dev package instead:
 
 1. Download a "dev" build from the community Windows builds:
    https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
@@ -38,7 +52,10 @@ time) — use a prebuilt dev package instead:
 
 ## License
 
-libmpv is LGPLv2.1+. It's dynamically linked (`mpv-2.dll` is loaded at
-runtime, not statically compiled in), which keeps this project free to use
-its own license regardless of libmpv's. Ship `mpv-2.dll` alongside the
-executable and keep a copy of mpv's license/notices with the distribution.
+libmpv is LGPLv2.1+. It's dynamically linked (`mpv-2.dll` on Windows,
+`libmpv.so` on Linux — loaded at runtime, not statically compiled in), which
+keeps this project free to use its own license regardless of libmpv's. On
+Windows, ship `mpv-2.dll` alongside the executable; on Linux, the distro's
+own `libmpv`/`libmpv2` package satisfies this at install time instead, so it
+belongs in the package's dependency list rather than being bundled. Either
+way, keep a copy of mpv's license/notices with the distribution.

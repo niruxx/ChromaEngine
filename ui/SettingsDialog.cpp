@@ -100,8 +100,14 @@ void SettingsDialog::buildUi()
     auto* browseButton = new QPushButton(QStringLiteral("Browse..."), this);
     AnimationHelpers::installPressAnimation(browseButton);
     connect(browseButton, &QPushButton::clicked, this, [this] {
-        const QString folder =
-            QFileDialog::getExistingDirectory(this, QStringLiteral("Choose default wallpaper folder"), m_defaultFolder);
+        QFileDialog::Options options;
+#ifndef _WIN32
+        // See the matching comment in SettingsWindow.cpp's "Open Folder"
+        // handler - avoids depending on the XDG desktop portal.
+        options |= QFileDialog::DontUseNativeDialog;
+#endif
+        const QString folder = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Choose default wallpaper folder"), m_defaultFolder, options);
         if (!folder.isEmpty())
             emit defaultFolderChanged(folder);
     });
@@ -154,6 +160,24 @@ void SettingsDialog::buildUi()
     connect(m_memoryLimitCheck, &QCheckBox::toggled, this, emitMemoryLimit);
     connect(m_memoryLimitSpin, qOverload<int>(&QSpinBox::valueChanged), this, emitMemoryLimit);
     generalLayout->addWidget(memoryGroup);
+
+    auto* renderingGroup = new QGroupBox(QStringLiteral("Rendering"), this);
+    auto* renderingLayout = new QVBoxLayout(renderingGroup);
+    m_softwareRenderingCheck =
+        new QCheckBox(QStringLiteral("Force software rendering (compatibility mode)"), this);
+    renderingLayout->addWidget(m_softwareRenderingCheck);
+
+    auto* renderingNote = new QLabel(
+        QStringLiteral("Turn this on if the wallpaper doesn't appear, or shows in its own separate window instead "
+                        "of on the desktop - common on virtual machines and remote desktops without a real GPU. "
+                        "Takes effect the next time the app starts."),
+        this);
+    renderingNote->setWordWrap(true);
+    renderingNote->setStyleSheet(QStringLiteral("color: #9a9aa0; font-size: 11px;"));
+    renderingLayout->addWidget(renderingNote);
+
+    connect(m_softwareRenderingCheck, &QCheckBox::toggled, this, &SettingsDialog::softwareRenderingToggled);
+    generalLayout->addWidget(renderingGroup);
 
     generalLayout->addStretch(1);
     tabs->addTab(generalTab, QStringLiteral("General"));
@@ -444,6 +468,12 @@ void SettingsDialog::setMemoryLimit(bool enabled, int limitMb)
     const QSignalBlocker spinBlocker(m_memoryLimitSpin);
     m_memoryLimitCheck->setChecked(enabled);
     m_memoryLimitSpin->setValue(limitMb);
+}
+
+void SettingsDialog::setSoftwareRendering(bool enabled)
+{
+    const QSignalBlocker blocker(m_softwareRenderingCheck);
+    m_softwareRenderingCheck->setChecked(enabled);
 }
 
 void SettingsDialog::setBackgroundTheme(int themeIndex)

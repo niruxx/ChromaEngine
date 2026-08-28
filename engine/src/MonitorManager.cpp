@@ -72,6 +72,26 @@ QList<MonitorInfo> MonitorManager::listMonitors()
 
 #ifdef _WIN32
     EnumDisplayMonitors(nullptr, nullptr, enumMonitorProc, reinterpret_cast<LPARAM>(&monitors));
+#else
+    // No native per-monitor enumeration API to go through here the way
+    // Windows' EnumDisplayMonitors needs (X11/XRandR's own info is exactly
+    // what QScreen is already built on) - QGuiApplication::screens() gives
+    // real per-monitor geometry directly.
+    QScreen* primary = QGuiApplication::primaryScreen();
+    for (QScreen* screen : QGuiApplication::screens()) {
+        MonitorInfo monitor;
+        // QScreen::name() is the output name (e.g. "eDP-1", "HDMI-1") on
+        // X11/XRandR - stable across sessions, unlike a positional index.
+        monitor.id = screen->name();
+        monitor.isPrimary = (screen == primary);
+        monitor.geometry = screen->geometry();
+        monitor.name = QStringLiteral("%1 (%2x%3)%4")
+                           .arg(monitor.id)
+                           .arg(monitor.geometry.width())
+                           .arg(monitor.geometry.height())
+                           .arg(monitor.isPrimary ? QStringLiteral(" — Primary") : QString());
+        monitors.append(monitor);
+    }
 #endif
 
     if (monitors.isEmpty()) {

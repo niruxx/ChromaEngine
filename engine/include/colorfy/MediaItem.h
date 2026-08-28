@@ -62,6 +62,13 @@ struct MediaItem {
     bool memoryLimitEnabled = false;
     int memoryLimitMb = 4096; // hard cap via Windows Job Object, applied at process startup
 
+    // Forces mpv onto a plain, GPU-less rendering path (see MpvSurface.cpp)
+    // instead of its default GPU-accelerated one - for VMs/remote desktops/
+    // old hardware where GPU context creation is missing, broken, or flaky.
+    // Applied when each mpv instance is created, so - like the memory limit
+    // above - takes effect the next time the app starts.
+    bool softwareRendering = false;
+
     int previewFrameRateLimit = 0; // fps, 0 = unlimited; preview pane only, not the desktop wallpaper
 
     // Off by default: cycling every tile's thumbnail through several frames

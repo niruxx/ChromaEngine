@@ -23,6 +23,7 @@
 #include <QMessageBox>
 #include <QResizeEvent>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSlider>
 #include <QSplitter>
@@ -202,6 +203,18 @@ SettingsWindow::SettingsWindow(QWidget* parent)
 
     buildUi();
     resize(1040, 680);
+#ifndef _WIN32
+    // Frameless top-level windows don't reliably get centered by the window
+    // manager the way decorated ones do (confirmed live on xfwm4: it just
+    // appears wherever the WM's default placement happens to land it,
+    // nowhere near the screen center) - Windows' own placement already
+    // centers acceptably without this, so it's scoped to here rather than
+    // risking a behavior change on the platform that's actually been tested.
+    if (QScreen* activeScreen = screen()) {
+        const QRect available = activeScreen->availableGeometry();
+        move(available.center() - QPoint(width() / 2, height() / 2));
+    }
+#endif
 
     m_frameTimer = new QTimer(this);
     connect(m_frameTimer, &QTimer::timeout, this, &SettingsWindow::advanceFrame);
@@ -244,8 +257,19 @@ void SettingsWindow::buildUi()
 
     auto* openFolderAction = toolbar->addAction(IconFactory::folder(), QStringLiteral("Open Folder"));
     connect(openFolderAction, &QAction::triggered, this, [this] {
+        QFileDialog::Options options;
+#ifndef _WIN32
+        // Qt6's native dialog on Linux goes through the XDG desktop portal
+        // (org.freedesktop.portal.FileChooser) - on a system with no portal
+        // backend running (confirmed live: no session/desktop portal
+        // service available), that call fails and getExistingDirectory()
+        // silently returns an empty string with no dialog ever shown at
+        // all, rather than falling back automatically. Forcing Qt's own
+        // built-in dialog sidesteps the portal entirely.
+        options |= QFileDialog::DontUseNativeDialog;
+#endif
         const QString folder = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Choose wallpaper folder"), m_currentFolder);
+            this, QStringLiteral("Choose wallpaper folder"), m_currentFolder, options);
         if (!folder.isEmpty())
             emit folderChanged(folder);
     });
@@ -518,6 +542,13 @@ void SettingsWindow::buildUi()
         QStringLiteral("When off, the wallpaper covers desktop icons instead of sitting behind them."));
     connect(m_showDesktopIconsCheckBox, &QCheckBox::toggled, this, &SettingsWindow::showDesktopIconsChanged);
     previewLayout->addWidget(m_showDesktopIconsCheckBox);
+#ifndef _WIN32
+    // No cross-desktop-environment way to reorder against XFCE's/MATE's own
+    // desktop-icon window the way the Windows WorkerW-based build can (see
+    // platform/linux/main_linux.cpp) - hidden rather than left as a control
+    // that silently does nothing.
+    m_showDesktopIconsCheckBox->hide();
+#endif
 
     auto addFilterRow = [this, &previewLayout](const QString& label, QSlider*& sliderOut, auto&& onChange) {
         auto* row = new QHBoxLayout();

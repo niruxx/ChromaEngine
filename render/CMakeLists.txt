@@ -21,4 +21,14 @@ if(WIN32)
     else()
         message(FATAL_ERROR "Could not find mpv.lib or libmpv.dll.a in ${MPV_DIR} - see third_party/README.md")
     endif()
+elseif(UNIX AND NOT APPLE)
+    # Linux distros package libmpv's headers/pkg-config file directly (e.g.
+    # libmpv-dev on Debian/Ubuntu, mpv-libs-devel on Fedora, mpv on Arch) -
+    # no manual download step needed like on Windows.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+
+    # PUBLIC: platform/linux/ThumbnailGenerator.cpp also talks to libmpv
+    # directly, same as the Windows equivalent above.
+    target_link_libraries(colorfy_render PUBLIC PkgConfig::MPV)
 endif()

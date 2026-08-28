@@ -6,12 +6,46 @@ Windows and Linux (GNOME & KDE Plasma).
 
 ## Status
 
-Windows is fully built and has been actually run/tested (see below). A KDE
-Plasma wallpaper plugin now exists at `platform/linux/kde/` — written
-against Plasma/Qt6's documented APIs, but **not yet verified on a real
-Plasma system** (this was built in a Windows-only environment with no
-Linux/Plasma machine available; see `platform/linux/kde/README.md` for
-install/test steps and known gaps). GNOME is not started.
+Windows is fully built and has been actually run/tested (see below). Linux
+has two independent wallpaper paths:
+
+- `platform/linux/kde/` — a KDE Plasma wallpaper plugin (QML + KConfigXT,
+  written against Plasma/Qt6's documented APIs) for users on Plasma. See
+  `platform/linux/kde/README.md` for install steps and known gaps. **Not yet
+  verified on a real Plasma system.**
+- `platform/linux/` (this directory's siblings, building the same
+  `ChromaEngine` executable as Windows) — a generic X11 build for desktop
+  environments with no wallpaper plugin API of their own, namely **XFCE and
+  MATE**. It embeds libmpv the same way the Windows build does, just behind
+  an X11-specific window placement trick instead of the WorkerW one - see
+  "How it works (XFCE / MATE / other X11 desktops)" below. **Built and
+  actually run on a real XFCE (Fedora 44, X11 session) machine** - the
+  library/tray/preview/thumbnail UI all confirmed working live. Three real
+  bugs only surfaced this way and are now fixed: an unhandled X11 protocol
+  error that could kill the whole process (`X11WallpaperWindow.cpp`'s
+  `handleXError`), xfwm4's compositor "unredirecting" the monitor-sized
+  wallpaper window and covering the entire screen with it instead of placing
+  it behind everything (`_NET_WM_BYPASS_COMPOSITOR`, same file), and mpv's
+  default GPU-accelerated rendering path being unreliable on that
+  particular GPU-less test machine (`DRI3`/`VDPAU` both unavailable there) -
+  a new **"Force software rendering"** preference (General tab) switches mpv
+  to its plain-Xlib `vo=x11` output, which needs no GL/EGL context at all;
+  see "How it works" below for what it trades off. Two gaps remain open,
+  both specific to that test machine rather than confirmed as real bugs:
+  occasional crashes even with software rendering on (a different, more
+  specific X11/MIT-SHM error than the one the general handler above already
+  covers), and - a structural finding, not really an app bug - **xfdesktop
+  draws its desktop background and icons as a single opaque window covering
+  the whole screen**, so on a system configured that way nothing placed
+  behind it (by this app or by any similar tool) will be visible until
+  xfdesktop's own background is set to "None" via XFCE's Desktop Settings.
+  All of this needs checking on real, non-virtualized GPU hardware and a
+  default XFCE background setup to tell how much is this environment's
+  limitation versus a real bug - please report back either way.
+
+GNOME is not started - it defaults to a Wayland session, which the X11 path
+above doesn't support (see that section for why), and has no wallpaper
+plugin API like Plasma's to target instead.
 
 ## How it works (Windows)
 
@@ -116,6 +150,75 @@ current feature gaps relative to Windows (no real video thumbnails, no
 brightness/contrast/flip/zoom — mpv's video-equalizer/`vf` filters don't
 have a QtMultimedia equivalent).
 
+## How it works (XFCE / MATE / other X11 desktops)
+
+Neither XFCE nor MATE expose anything like Plasma's wallpaper plugin API, so
+`platform/linux/` instead builds the same kind of standalone app as Windows —
+same `engine`/`render`/`ui` code, same tray icon and library window, same
+libmpv-based `MpvSurface` — with an X11-specific technique standing in for
+Windows' WorkerW injection:
+
+1. `X11WallpaperWindow` creates a borderless, override-redirect window sized
+   to a monitor (`Qt::BypassWindowManagerHint`, so the window manager never
+   reparents or manages it) and reparents it directly into the X11 root
+   window, then calls `XLowerWindow` to force it to the very bottom of the
+   root's stacking order.
+2. libmpv embeds into that window the same way it embeds into an `HWND` on
+   Windows — `MpvSurface` just sets mpv's `wid` option to the window's X11
+   `Window` ID instead of a Windows handle.
+3. A periodic watchdog in `main_linux.cpp` re-lowers each wallpaper window
+   every couple of seconds, since a desktop shell restart (xfdesktop, most
+   notably) can re-raise its own desktop-icon window above ours otherwise.
+
+This is the same "reparent into root, lower to the bottom" approach
+`xwinwrap` and `mpvpaper` use, and it works the same way against any
+EWMH-compliant X11 window manager rather than needing a desktop-specific
+hook — which is also why it's not GNOME-specific and not tied to XFCE/MATE
+by name, just by the fact that both default to an X11 session today.
+
+**It needs a real X11 session.** Wayland compositors don't expose a root
+window or the override-redirect stacking model this depends on — running
+under Wayland (GNOME Shell's default, for instance), the app detects this at
+startup (`QGuiApplication::platformName() != "xcb"`) and warns that the
+library/tray still work but the wallpaper itself won't display. XFCE and
+MATE both default to X11 sessions as of writing, so this isn't a practical
+limitation for either.
+
+**It also needs xfdesktop (or your desktop manager's equivalent) to not be
+painting its own opaque background over the whole screen.** xfdesktop draws
+the desktop background and icons together as a single window, not as two
+separate layers - if that window covers the full screen (XFCE's default),
+nothing placed behind it in the stacking order is visible, no matter how
+correctly it's positioned. This isn't specific to this app - it's the same
+constraint every reparent-into-root wallpaper tool (`xwinwrap`, `mpvpaper`,
+etc.) runs into on XFCE. If the wallpaper doesn't appear, check XFCE's own
+Desktop Settings and set the background to "None" first, then let
+ChromaEngine draw underneath. (Confirmed as the cause on one test machine;
+not yet confirmed whether MATE's Caja/Marco desktop manager has the same
+behavior or something more cooperative.)
+
+**Rendering**: mpv's default video output needs a working GPU context
+(GL/EGL) to embed into the given window. On hardware where that's
+missing, broken, or flaky - virtual machines and some remote desktops,
+most commonly - it can fail to embed at all and fall back to a separate
+top-level mpv window instead of becoming the wallpaper, or behave
+unreliably in other ways. The **"Force software rendering"** checkbox in
+Preferences → General switches mpv to its `vo=x11` output instead, which
+needs no GPU context whatsoever (confirmed live: eliminates the
+DRI3/VDPAU driver warnings entirely) at the cost of higher CPU usage and no
+hardware-accelerated decode. Takes effect the next time the app starts, same
+as the memory limit setting above it.
+
+**Known gaps relative to Windows**: no equivalent of "show/hide desktop
+icons behind the wallpaper" (that checkbox is hidden on Linux — there's no
+cross-desktop-environment way to reorder against XFCE's/MATE's own
+desktop-icon window the way Windows' WorkerW-based build can); the
+clock/calendar/battery overlay's Bluetooth battery readout depends on
+BlueZ's `org.bluez.Battery1` D-Bus interface being populated for a device
+(true for most modern BLE devices bluetoothd already tracks, but not
+guaranteed for every device/driver combination the way Windows' own
+Settings-backed battery value is).
+
 ## Current scope
 
 Implemented (Windows): multi-monitor wallpaper targeting, local MP4/GIF
@@ -129,8 +232,16 @@ Implemented (KDE Plasma), unverified: folder-based library with a file
 picker, fill mode, mute/volume, playback speed — see
 `platform/linux/kde/README.md` for what's missing relative to Windows.
 
-Not yet implemented (planned): per-monitor *different* wallpapers on
-Windows (all enabled monitors currently show the same file),
+Implemented (Linux/X11 — XFCE, MATE, and other EWMH window managers), built
+and run live on real XFCE: everything the Windows build has except
+per-monitor *different* wallpapers (same limitation as Windows, see below),
+the OS-wide accent color (same descope as Windows), and "show/hide desktop
+icons behind the wallpaper" — see "How it works (XFCE / MATE / other X11
+desktops)" above for what's missing and why, including the one open item
+from live testing (mpv embedding on GPU-less machines).
+
+Not yet implemented (planned): per-monitor *different* wallpapers (all
+enabled monitors currently show the same file, on every platform),
 playlists/scheduling, installer packaging, and GNOME. The Windows OS-wide
 accent color was deliberately left out — descoped by request in favor of
 not touching system-wide theme state.
@@ -149,6 +260,41 @@ cmake --build build --config Release
 The built executable is `ChromaEngine.exe`; `mpv-2.dll` is copied next to it
 automatically during the build.
 
+## Building (Linux — XFCE, MATE, other X11 desktops)
+
+Requirements: CMake 3.21+, a C++20 compiler (GCC or Clang), Qt6
+(Core/Gui/Widgets/DBus), libmpv, and Xlib development headers. On Debian/
+Ubuntu:
+
+```
+sudo apt install build-essential cmake qt6-base-dev libqt6dbus6 qt6-base-dev-tools \
+                  libmpv-dev libx11-dev
+```
+
+On Fedora:
+
+```
+sudo dnf install cmake gcc-c++ qt6-qtbase-devel mpv-libs-devel libX11-devel
+```
+
+Then, from the repo root:
+
+```
+cmake -B build
+cmake --build build
+```
+
+No `-DMPV_DIR` needed here — unlike Windows, Linux distros package libmpv's
+`pkg-config` file directly, and `render/CMakeLists.txt` finds it that way.
+The built executable is `build/platform/linux/ChromaEngine`; running
+`cmake --install build` installs it plus a `.desktop` launcher entry
+(`platform/linux/chroma-engine.desktop`).
+
+KDE Plasma users: install `platform/linux/kde/` instead (see its own
+README) for the native wallpaper-plugin experience — this X11 build still
+works under a Plasma X11 session as a fallback, just without Plasma's own
+per-screen/per-activity wallpaper configuration UI around it.
+
 ## Project layout
 
 ```
@@ -156,6 +302,7 @@ engine/     platform-agnostic core: config persistence, monitor enumeration, fol
 render/     libmpv wrapper (video + GIF playback, filters/flip/speed/zoom)
 ui/         library-grid window, preferences dialog, custom icon set, tray icon, animation helpers
 platform/windows/   WorkerW injection, wallpaper window(s), thumbnail grabber, startup registry, DPI manifest, app entry point
+platform/linux/     X11 wallpaper window (reparent-into-root + lower), thumbnail grabber, XDG autostart, BlueZ battery reader, app entry point
 platform/linux/kde/ Plasma wallpaper plugin (QML + KConfigXT, no build step) - see its own README
 third_party/        notes on fetching libmpv
 ```

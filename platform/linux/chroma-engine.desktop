@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ChromaEngine
+Comment=Animated video/GIF wallpaper engine
+Exec=ChromaEngine
+Icon=chroma-engine
+Terminal=false
+Categories=Utility;DesktopSettings;
+StartupNotify=true

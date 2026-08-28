@@ -2,8 +2,7 @@
 #include "MemoryLimiter.h"
 #include "StartupManager.h"
 #include "ThumbnailGenerator.h"
-#include "WallpaperWindow.h"
-#include "WorkerWHost.h"
+#include "X11WallpaperWindow.h"
 
 #include "render/MpvSurface.h"
 #include "ui/IconFactory.h"
@@ -16,18 +15,15 @@
 #include "colorfy/MonitorManager.h"
 
 #include <QApplication>
-#include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QSharedMemory>
-#include <QStandardPaths>
-#include <QTextStream>
 #include <QTimer>
 
-#include <windows.h>
-
+#include <clocale>
 #include <functional>
 #include <memory>
 
@@ -35,27 +31,8 @@ using namespace colorfy;
 
 namespace {
 
-// TEMPORARY diagnostic: pinpointing a reported freeze (spinning cursor,
-// rest of the OS stays responsive) when closing to tray then right-
-// clicking the tray icon. Shares one log file with SettingsWindow.cpp and
-// TrayIcon.cpp. The heartbeat is the key piece: if it keeps ticking through
-// the "frozen cursor" window, the main thread's event loop is fine and the
-// problem is elsewhere (shell/tray layer); if it stops, the main thread is
-// genuinely blocked and whatever ran just before the last tick is the
-// cause. Remove once resolved.
-void chromaDebugLog(const QString& line)
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    QDir().mkpath(dir);
-    QFile f(dir + QStringLiteral("/chroma_debug.log"));
-    if (f.open(QIODevice::Append | QIODevice::Text)) {
-        QTextStream ts(&f);
-        ts << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " " << line << Qt::endl;
-    }
-}
-
 struct MonitorSurface {
-    WallpaperWindow* window = nullptr;
+    X11WallpaperWindow* window = nullptr;
     MpvSurface* mpv = nullptr;
     DesktopOverlayWindow* overlay = nullptr;
 };
@@ -92,13 +69,51 @@ void loadFolderIntoSettings(SettingsWindow* settingsWindow, ThumbnailGenerator* 
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+
+    // QApplication's constructor calls setlocale(LC_ALL, "") from the
+    // environment (LANG/LC_NUMERIC), which on any locale using a
+    // non-'.' decimal separator breaks libmpv's internal option parsing -
+    // mpv hard-requires LC_NUMERIC to stay "C" (confirmed live: without
+    // this, mpv logs "Non-C locale detected" at every MpvSurface
+    // construction). Reset just that category back, after Qt's own call,
+    // leaving LC_MESSAGES/LC_TIME/etc. alone for the rest of the UI.
+    std::setlocale(LC_NUMERIC, "C");
+
     app.setQuitOnLastWindowClosed(false);
     app.setApplicationName(QStringLiteral("ChromaEngine"));
     app.setOrganizationName(QStringLiteral("chroma-engine"));
     app.setWindowIcon(IconFactory::appLogo(64));
 
-    // Single-instance guard: a second launch just notifies and exits.
+    // The wallpaper technique below (reparenting an override-redirect
+    // window into the X11 root window and lowering it) needs an actual X11
+    // session - Wayland compositors don't expose the root-window stacking
+    // model it depends on. XFCE and MATE both default to X11 today, so this
+    // covers them; a Wayland session (e.g. GNOME Shell's default) still gets
+    // the library/tray UI, just not a working desktop wallpaper.
+    if (app.platformName() != QStringLiteral("xcb")) {
+        QMessageBox::warning(nullptr, QStringLiteral("ChromaEngine"),
+                              QStringLiteral("ChromaEngine's desktop wallpaper needs an X11 session (it's running "
+                                              "under \"%1\"). The library and preview will still work, but the "
+                                              "wallpaper itself won't display.")
+                                  .arg(app.platformName()));
+    }
+
+    // Single-instance guard: a second launch just notifies and exits. On
+    // Linux, QSharedMemory is backed by a SysV segment that isn't
+    // reference-counted by the kernel the way a Windows CreateFileMapping
+    // handle is - if a previous instance was killed abruptly (SIGTERM/
+    // SIGKILL, no destructor run), the segment can outlive it with nothing
+    // attached, and every future create() call fails as "already exists"
+    // forever after, even though nothing is actually running (confirmed
+    // live: exactly this happened after killing a test run with `timeout`).
+    // Attaching and immediately detaching first reclaims an orphaned
+    // segment like that - QSharedMemory::detach() removes the underlying
+    // segment once its last attachment drops to zero - while being a no-op
+    // against a real running instance, since attach() there just adds and
+    // removes our own reference without affecting the owner.
     QSharedMemory singleInstanceGuard(QStringLiteral("chroma-engine-single-instance"));
+    if (singleInstanceGuard.attach())
+        singleInstanceGuard.detach();
     if (!singleInstanceGuard.create(1)) {
         QMessageBox::information(nullptr, QStringLiteral("ChromaEngine"),
                                   QStringLiteral("ChromaEngine is already running."));
@@ -141,19 +156,12 @@ int main(int argc, char* argv[])
         }
     });
 
-    auto* heartbeatTimer = new QTimer(&app);
-    QObject::connect(heartbeatTimer, &QTimer::timeout, &app, [] { chromaDebugLog(QStringLiteral("heartbeat")); });
-    heartbeatTimer->start(250);
-
-    auto* workerWHost = new WorkerWHost(&app);
-    auto currentWorkerW = std::make_shared<void*>(workerWHost->attach());
-
     auto monitorSurfaces = std::make_shared<QList<MonitorSurface>>();
 
     auto* thumbnailGenerator = new ThumbnailGenerator(&app);
     auto* settingsWindow = new SettingsWindow();
 
-    std::function<void()> rebuildSurfaces = [&app, workerWHost, currentWorkerW, monitorSurfaces, media]() {
+    std::function<void()> rebuildSurfaces = [&app, monitorSurfaces, media]() {
         for (const MonitorSurface& s : *monitorSurfaces) {
             delete s.mpv;
             delete s.window;
@@ -165,20 +173,16 @@ int main(int argc, char* argv[])
             if (!media->enabledMonitorIds.contains(info.id))
                 continue;
 
-            auto* window = new WallpaperWindow(info.geometry);
-            window->show();
-            window->attachToWorkerW(*currentWorkerW);
-            window->setShowDesktopIcons(media->showDesktopIcons);
+            auto* window = new X11WallpaperWindow(info.geometry);
 
             auto* surface = new MpvSurface(window->nativeHandle(), media->softwareRendering, &app);
+            installX11ErrorHandler();
             applyAppearance(surface, *media);
             surface->setMuted(media->muted);
             surface->setVolume(media->volume);
             if (!media->filePath.isEmpty())
                 surface->loadFile(media->filePath);
 
-            // Not reparented into WorkerW (see DesktopOverlayWindow's class
-            // comment) - a separate, genuinely top-level window instead.
             auto* overlay = new DesktopOverlayWindow(info.geometry);
             overlay->applySettings(*media);
             overlay->showOnDesktop();
@@ -187,14 +191,16 @@ int main(int argc, char* argv[])
         }
     };
     rebuildSurfaces();
-    workerWHost->setShowDesktopIcons(media->showDesktopIcons);
 
-    workerWHost->startWatchdog();
-    QObject::connect(workerWHost, &WorkerWHost::workerWChanged, &app, [currentWorkerW, monitorSurfaces](void* hwnd) {
-        *currentWorkerW = hwnd;
+    // Periodically re-lowers each wallpaper window - some desktop shells
+    // (xfdesktop in particular, on restart) re-raise their own desktop
+    // window, which would otherwise end up covering ours.
+    auto* placementWatchdog = new QTimer(&app);
+    QObject::connect(placementWatchdog, &QTimer::timeout, &app, [monitorSurfaces] {
         for (const MonitorSurface& s : *monitorSurfaces)
-            s.window->attachToWorkerW(hwnd);
+            s.window->lowerToBottom();
     });
+    placementWatchdog->start(2000);
 
     // Applies a change to the live desktop wallpaper(s) and (appearance-only
     // changes) the preview surface, declared after previewSurface below.
@@ -206,6 +212,7 @@ int main(int argc, char* argv[])
     // Live preview pane: a second, always-muted mpv instance embedded in the
     // settings window, independent of the actual desktop wallpaper surface.
     auto* previewSurface = new MpvSurface(settingsWindow->previewNativeHandle(), media->softwareRendering, &app);
+    installX11ErrorHandler();
     previewSurface->setMuted(true);
     applyAppearance(previewSurface, *media);
     previewSurface->setFrameRateLimit(media->previewFrameRateLimit);
@@ -221,6 +228,7 @@ int main(int argc, char* argv[])
     settingsWindow->setMediaItem(*media);
     settingsWindow->setThumbnailAutoPlayEnabled(media->thumbnailAutoPlayEnabled);
     thumbnailGenerator->setAutoPlayEnabled(media->thumbnailAutoPlayEnabled);
+    thumbnailGenerator->setSoftwareRenderingEnabled(media->softwareRendering);
 
     QObject::connect(thumbnailGenerator, &ThumbnailGenerator::framesReady, settingsWindow, &SettingsWindow::setFrames);
 
@@ -238,18 +246,11 @@ int main(int argc, char* argv[])
     auto* trayIcon = new TrayIcon(&app);
 
     QObject::connect(trayIcon, &TrayIcon::openSettingsRequested, settingsWindow, [settingsWindow] {
-        chromaDebugLog(QStringLiteral("openSettingsRequested: show() start"));
         settingsWindow->show();
-        chromaDebugLog(QStringLiteral("openSettingsRequested: show() done, raise() start"));
         settingsWindow->raise();
-        chromaDebugLog(QStringLiteral("openSettingsRequested: raise() done, activateWindow() start"));
         settingsWindow->activateWindow();
-        chromaDebugLog(QStringLiteral("openSettingsRequested: activateWindow() done"));
     });
-    QObject::connect(trayIcon, &TrayIcon::quitRequested, &app, [] {
-        chromaDebugLog(QStringLiteral("quitRequested"));
-        qApp->quit();
-    });
+    QObject::connect(trayIcon, &TrayIcon::quitRequested, &app, [] { qApp->quit(); });
     QObject::connect(trayIcon, &TrayIcon::pauseToggled, &app,
                       [forEachDesktopSurface](bool paused) { forEachDesktopSurface([paused](MpvSurface* s) { s->setPaused(paused); }); });
 
@@ -338,13 +339,16 @@ int main(int argc, char* argv[])
                           scheduleConfigSave();
                           forEachSurface([rate](MpvSurface* s) { s->setSpeed(rate); });
                       });
+    // "Show desktop icons" has no equivalent here (see MediaItem.h): there's
+    // no single, reliable cross-desktop-environment way to reorder our
+    // window against XFCE's/MATE's own desktop-icon window the way the
+    // Windows WorkerW-based build can. The setting still persists so the
+    // Windows and Linux config formats stay compatible - it just has no
+    // effect on this platform.
     QObject::connect(settingsWindow, &SettingsWindow::showDesktopIconsChanged, &app,
-                      [workerWHost, monitorSurfaces, media, scheduleConfigSave](bool show) {
+                      [media, scheduleConfigSave](bool show) {
                           media->showDesktopIcons = show;
                           scheduleConfigSave();
-                          workerWHost->setShowDesktopIcons(show);
-                          for (const MonitorSurface& s : *monitorSurfaces)
-                              s.window->setShowDesktopIcons(show);
                       });
 
     QObject::connect(settingsWindow, &SettingsWindow::renameRequested, &app,

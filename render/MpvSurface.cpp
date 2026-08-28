@@ -23,7 +23,7 @@ void checkError(int status, const char* what)
 
 } // namespace
 
-MpvSurface::MpvSurface(void* nativeWindowHandle, QObject* parent)
+MpvSurface::MpvSurface(void* nativeWindowHandle, bool softwareRendering, QObject* parent)
     : QObject(parent)
 {
     m_mpv = mpv_create();
@@ -35,14 +35,41 @@ MpvSurface::MpvSurface(void* nativeWindowHandle, QObject* parent)
 #ifdef _WIN32
     int64_t wid = reinterpret_cast<int64_t>(reinterpret_cast<HWND>(nativeWindowHandle));
     mpv_set_option(m_mpv, "wid", MPV_FORMAT_INT64, &wid);
+#elif defined(Q_OS_LINUX)
+    // nativeWindowHandle is an X11 Window (XID) handed in as a QWidget's
+    // winId() by the platform layer - same "wid" embedding mechanism as
+    // Windows, just with an X11 window ID instead of an HWND.
+    int64_t wid = static_cast<int64_t>(reinterpret_cast<quintptr>(nativeWindowHandle));
+    mpv_set_option(m_mpv, "wid", MPV_FORMAT_INT64, &wid);
 #endif
+
+    if (softwareRendering) {
+#if defined(Q_OS_LINUX)
+        // mpv's default "gpu" vo needs a working GL/Vulkan context against
+        // the given wid - on a machine with no real GPU (confirmed live: a
+        // VM with neither DRI3 nor VDPAU available), that negotiation can
+        // fail outright or succeed unreliably, and mpv's fallback in that
+        // case is to open its own separate top-level window instead of
+        // embedding into ours at all, rather than actually using software
+        // rendering. "x11" is mpv's plain Xlib output (software color
+        // conversion + XPutImage/XShm) - no GL/EGL/Vulkan involved anywhere,
+        // so it embeds into a foreign "wid" reliably regardless of what
+        // hardware acceleration is or isn't available.
+        mpv_set_option_string(m_mpv, "vo", "x11");
+#endif
+        // GPU-less output can't display hardware-decoded frames directly
+        // either way, so skip attempting hardware decode entirely rather
+        // than paying for a hwdec probe that would just fall back anyway.
+        mpv_set_option_string(m_mpv, "hwdec", "no");
+    } else {
+        mpv_set_option_string(m_mpv, "hwdec", "auto");
+    }
 
     // Wallpaper defaults: loop forever, no on-screen controls, no input
     // handling (the window sits behind desktop icons, it never has focus).
     mpv_set_option_string(m_mpv, "loop-file", "inf");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
     mpv_set_option_string(m_mpv, "mute", "yes");
-    mpv_set_option_string(m_mpv, "hwdec", "auto");
     // Bounds the software-decode fallback's thread pool (FFmpeg otherwise
     // defaults to roughly one thread per CPU core) - hwdec=auto normally
     // avoids needing this at all, but if hardware decode isn't available

@@ -46,6 +46,7 @@ MediaItem ConfigStore::load()
 
     item.memoryLimitEnabled = obj.value(QStringLiteral("memoryLimitEnabled")).toBool(false);
     item.memoryLimitMb = obj.value(QStringLiteral("memoryLimitMb")).toInt(4096);
+    item.softwareRendering = obj.value(QStringLiteral("softwareRendering")).toBool(false);
     item.previewFrameRateLimit = obj.value(QStringLiteral("previewFrameRateLimit")).toInt(0);
     item.thumbnailAutoPlayEnabled = obj.value(QStringLiteral("thumbnailAutoPlayEnabled")).toBool(false);
 
@@ -99,6 +100,7 @@ void ConfigStore::save(const MediaItem& item)
 
     obj[QStringLiteral("memoryLimitEnabled")] = item.memoryLimitEnabled;
     obj[QStringLiteral("memoryLimitMb")] = item.memoryLimitMb;
+    obj[QStringLiteral("softwareRendering")] = item.softwareRendering;
     obj[QStringLiteral("previewFrameRateLimit")] = item.previewFrameRateLimit;
     obj[QStringLiteral("thumbnailAutoPlayEnabled")] = item.thumbnailAutoPlayEnabled;
 

@@ -22,4 +22,6 @@ add_subdirectory(ui)
 
 if(WIN32)
     add_subdirectory(platform/windows)
+elseif(UNIX AND NOT APPLE)
+    add_subdirectory(platform/linux)
 endif()

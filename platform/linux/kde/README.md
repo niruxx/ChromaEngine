@@ -9,6 +9,10 @@ try it, and report back anything that breaks — QML errors show up in
 `journalctl --user -f` or by running `plasmashell --replace` from a
 terminal while you switch wallpaper types.
 
+Not on Plasma? See `platform/linux/` (one level up) instead — a generic X11
+build of the same standalone app Windows gets, for desktop environments
+without a wallpaper plugin API of their own (XFCE, MATE).
+
 ## What this is
 
 Unlike Windows (which has no OS concept of a video wallpaper, hence the

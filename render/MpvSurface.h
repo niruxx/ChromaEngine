@@ -15,7 +15,11 @@ namespace colorfy {
 class MpvSurface : public QObject {
     Q_OBJECT
 public:
-    explicit MpvSurface(void* nativeWindowHandle, QObject* parent = nullptr);
+    // softwareRendering forces mpv onto a GPU-less rendering path - see the
+    // .cpp for what that means per platform - for VMs/remote desktops/old
+    // hardware where GPU context creation for the default path is missing,
+    // broken, or flaky.
+    explicit MpvSurface(void* nativeWindowHandle, bool softwareRendering = false, QObject* parent = nullptr);
     ~MpvSurface() override;
 
     void loadFile(const QString& path);

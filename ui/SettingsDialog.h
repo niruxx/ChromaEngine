@@ -35,6 +35,7 @@ public:
     void setBackgroundTheme(int themeIndex);
     void setMonitors(const QList<MonitorInfo>& monitors, const QStringList& enabledIds);
     void setMemoryLimit(bool enabled, int limitMb);
+    void setSoftwareRendering(bool enabled);
 
     void setClockSettings(bool enabled, int layout, int theme, const QString& fontFamily, int fontSize, int rotation,
                            int position, int margin);
@@ -50,6 +51,7 @@ signals:
     void backgroundThemeChanged(int themeIndex);
     void monitorToggled(const QString& monitorId, bool enabled);
     void memoryLimitChanged(bool enabled, int limitMb);
+    void softwareRenderingToggled(bool enabled);
 
     void clockSettingsChanged(bool enabled, int layout, int theme, const QString& fontFamily, int fontSize,
                                int rotation, int position, int margin);
@@ -77,6 +79,8 @@ private:
     QCheckBox* m_memoryLimitCheck = nullptr;
     QSpinBox* m_memoryLimitSpin = nullptr;
     QLabel* m_memoryLimitNote = nullptr;
+
+    QCheckBox* m_softwareRenderingCheck = nullptr;
 
     QCheckBox* m_clockEnabledCheck = nullptr;
     QComboBox* m_clockLayoutCombo = nullptr;
